@@ -126,7 +126,7 @@ namespace ToastAlert.Config
                     Enabled = true,
                     CustomAbbreviations = new Dictionary<string, string>
                     {
-                        { "ФПВ", "Фи Пи Ви" },
+                        
                         { "ЧС", "Чэ Эс" },
                         { "МЧС", "Эм Чэ Эс" },
                         { "МО", "Эм О" },
