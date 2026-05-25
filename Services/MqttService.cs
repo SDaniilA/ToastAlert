@@ -174,21 +174,27 @@ namespace ToastAlert.Services
             catch (Exception ex) { Console.WriteLine($"   ⚠️ MQTT публикация: {ex.Message}"); }
         }
 
-        public async Task DisconnectAsync()
-        {
-            if (_client != null && _connected)
-            {
-                _manualDisconnect = true;
-                try
-                {
-                    await _client.DisconnectAsync();
-                    _client.DisconnectedAsync -= OnDisconnected;
-                    _client.Dispose();
-                    Console.WriteLine("   ✅ MQTT отключён");
-                }
-                finally { _manualDisconnect = false; }
-            }
-        }
+		public async Task DisconnectAsync()
+		{
+			if (_client != null && _connected)
+			{
+				_manualDisconnect = true;
+				try
+				{
+					// Таймаут 1 секунда на отключение
+					var disconnectTask = _client.DisconnectAsync();
+					await Task.WhenAny(disconnectTask, Task.Delay(1000));
+					_client.DisconnectedAsync -= OnDisconnected;
+					_client.Dispose();
+					Console.WriteLine("   ✅ MQTT отключён");
+				}
+				finally
+				{
+					_manualDisconnect = false;
+					_connected = false;
+				}
+			}
+		}
 
         public async Task ToggleAsync()
         {

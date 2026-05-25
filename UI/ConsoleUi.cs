@@ -73,7 +73,8 @@ namespace ToastAlert.UI
 
         public async Task HandleKeyboardAsync()
         {
-            await Task.Run(() => { }); // принудительный async, убирает CS1998
+            await Task.Yield();
+			//await Task.Run(() => { }); // принудительный async, убирает CS1998
             while (_isRunning && !_cts.Token.IsCancellationRequested)
             {
                 var key = Console.ReadKey(true);
@@ -231,7 +232,7 @@ namespace ToastAlert.UI
         {
             Console.WriteLine(@"
 ╔══════════════════════════════════════════════════════════════╗
-║        TOAST ALERT MONITOR v14.0 - Refactored v1             ║
+║        TOAST ALERT MONITOR v14.0.1				           ║
 ║     Мониторинг через центр уведомлений Windows               ║
 ╚══════════════════════════════════════════════════════════════╝");
             Console.WriteLine($"   🕐 Запуск: {DateTime.Now:HH:mm:ss}");

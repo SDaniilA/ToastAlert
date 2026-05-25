@@ -131,7 +131,7 @@ namespace ToastAlert.Core
             }
             finally
             {
-                await CleanupAsync();
+                await Cleanup();
             }
         }
 
@@ -200,13 +200,13 @@ namespace ToastAlert.Core
             var cfg = _config;
 
             if (cfg.Monitoring.ConsoleOutputEnabled)
-            {
-                Console.WriteLine($"\n📨 [{_stats.Total}] {sender}");
-                string shortMsg = cfg.Monitoring.ConsoleMaxMessageLength > 0 && message.Length > cfg.Monitoring.ConsoleMaxMessageLength
-                    ? message.Substring(0, cfg.Monitoring.ConsoleMaxMessageLength)
-                    : message;
-                Console.WriteLine($"   {shortMsg}");
-            }
+			{
+				Console.WriteLine($"\n[{DateTime.Now:HH:mm:ss}] 📨 [{_stats.Total}] {sender}");
+				string shortMsg = cfg.Monitoring.ConsoleMaxMessageLength > 0 && message.Length > cfg.Monitoring.ConsoleMaxMessageLength
+					? message.Substring(0, cfg.Monitoring.ConsoleMaxMessageLength)
+					: message;
+				Console.WriteLine($"   {shortMsg}");
+			}
 
             // Чёрный список отправителей
             if (IsSenderBlacklisted(sender))
@@ -218,18 +218,32 @@ namespace ToastAlert.Core
             }
 
             // Дедупликация
-            if (_dedup.IsDuplicate(message, sender, out double sim, out string dupSender, out _))
-            {
-                if (cfg.Deduplication.LogDuplicates && cfg.Monitoring.ConsoleOutputEnabled)
-                {
-                    Console.ForegroundColor = ConsoleColor.DarkGray;
-                    Console.WriteLine($"   ⏭️ ДУБЛЬ ({sim:P0}) от {dupSender}");
-                    Console.ResetColor();
-                }
-                Interlocked.Increment(ref _stats.Skipped);
-                lock (_processedIdsLock) { _processedIds.Add(id); }
-                return;
-            }
+            if (_dedup.IsDuplicate(message, sender, out double sim, out string dupSender, out string? dupMsg))
+			{
+				if (cfg.Deduplication.LogDuplicates && cfg.Monitoring.ConsoleOutputEnabled)
+				{
+					Console.ForegroundColor = ConsoleColor.DarkGray;
+					Console.WriteLine($"[{DateTime.Now:HH:mm:ss}]    ⏭️ ДУБЛЬ ({sim:P0}) от {dupSender}");
+					Console.ResetColor();
+				}
+				Interlocked.Increment(ref _stats.Skipped);
+				lock (_processedIdsLock) { _processedIds.Add(id); }
+
+				// Удаление дубля
+				if (cfg.NotificationDeletion.DeleteMode == "immediate")
+				{
+					try { _listener?.RemoveNotification(id); } catch { }
+					if (cfg.Monitoring.ConsoleOutputEnabled)
+						Console.WriteLine($"[{DateTime.Now:HH:mm:ss}]    🗑️ Удалено (дубль)");
+				}
+				else if (cfg.NotificationDeletion.DeleteMode == "on_exit")
+				{
+					_pendingDeletes.Enqueue(id);
+					if (cfg.Monitoring.ConsoleOutputEnabled && cfg.Additional.DebugMode)
+						Console.WriteLine($"[{DateTime.Now:HH:mm:ss}]    📋 В очереди (дубль)");
+				}
+				return;
+			}
             _dedup.AddToBuffer(message, sender, message);
 
             bool isAllowed = IsSenderAllowed(sender);
@@ -253,7 +267,7 @@ namespace ToastAlert.Core
                 _tts.UpdateLastSpeechTime();
                 Interlocked.Increment(ref _stats.Spoken);
                 if (cfg.Monitoring.ConsoleOutputEnabled)
-                    Console.WriteLine($"   🔊 ОЗВУЧЕНО!{(matchesFilter ? " 🔥 КЛЮЧЕВОЕ СЛОВО!" : "")}");
+                    Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] 🔊 ОЗВУЧЕНО!{(matchesFilter ? " 🔥 КЛЮЧЕВОЕ СЛОВО!" : "")}");
                 if (cfg.Monitoring.ShowPopupNotifications)
                     ShowPopupNotification(sender, message);
             }
@@ -262,7 +276,7 @@ namespace ToastAlert.Core
                 Interlocked.Increment(ref _stats.Skipped);
                 if (cfg.Monitoring.ConsoleOutputEnabled)
                 {
-                    if (!isAllowed) Console.WriteLine($"   ⏭️ Отправитель не в списке");
+                    if (!isAllowed) Console.WriteLine($"[{DateTime.Now:HH:mm:ss}]  ⏭️ Отправитель не в списке");
                     else if (_tts.IsMuted) Console.WriteLine($"   🔇 Звук отключен (M)");
                     else if (!shouldSpeak) Console.WriteLine($"   ⏭️ Нет ключевых слов");
                     else if (!_tts.CanSpeakNow()) Console.WriteLine($"   ⏳ Задержка {cfg.VoiceAlert.MinDelayBetweenMessagesMs}мс");
@@ -274,7 +288,7 @@ namespace ToastAlert.Core
             if (cfg.NotificationDeletion.DeleteMode == "immediate")
             {
                 try { _listener?.RemoveNotification(id); } catch { }
-                if (cfg.Monitoring.ConsoleOutputEnabled) Console.WriteLine($"   🗑️ Удалено");
+                if (cfg.Monitoring.ConsoleOutputEnabled) Console.WriteLine($"[{DateTime.Now:HH:mm:ss}]    🗑️ Удалено");
             }
             else if (cfg.NotificationDeletion.DeleteMode == "on_exit")
                 _pendingDeletes.Enqueue(id);
@@ -391,25 +405,29 @@ namespace ToastAlert.Core
             catch (Exception ex) { Console.WriteLine($"❌ Ошибка восстановления listener: {ex.Message}"); }
         }
 
-        private async Task CleanupAsync()
-        {
-            _isRunning = false;
-            _cts.Cancel();
-            Console.WriteLine("\n🧹 Остановка и очистка...");
-            await _mqtt.DisconnectAsync();
-            if (_config.NotificationDeletion.DeleteMode == "on_exit")
-            {
-                int deleted = 0;
-                while (_pendingDeletes.TryDequeue(out uint id))
-                {
-                    try { _listener?.RemoveNotification(id); deleted++; } catch { }
-                }
-                Console.WriteLine($"   ✅ Удалено: {deleted}");
-            }
-            SaveProcessedIds();
-            _tts.Dispose();
-            Console.WriteLine($"\n📊 ИТОГОВАЯ СТАТИСТИКА: Всего: {_stats.Total}, Озвучено: {_stats.Spoken}, Пропущено: {_stats.Skipped}");
-            Console.WriteLine("✅ Завершено.");
-        }
+        private async Task Cleanup()
+		{
+			_isRunning = false;
+			_cts.Cancel();
+			Console.WriteLine("\n🧹 Остановка и очистка...");
+
+			var cleanupTask = Task.Run(async () =>
+			{
+				await _mqtt.DisconnectAsync();
+				if (_config.NotificationDeletion.DeleteMode == "on_exit")
+				{
+					int deleted = 0;
+					while (_pendingDeletes.TryDequeue(out uint id))
+					{
+						try { _listener?.RemoveNotification(id); deleted++; } catch { }
+					}
+					Console.WriteLine($"   ✅ Удалено: {deleted}");
+				}
+				SaveProcessedIds();
+				_tts.Dispose();
+			});
+			await Task.WhenAny(cleanupTask, Task.Delay(2000));
+			Console.WriteLine("   ✅ Очистка завершена (с таймаутом)");
+		}
     }
 }

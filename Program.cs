@@ -3,6 +3,9 @@ using System.Reflection;
 using System.Threading.Tasks;
 using System.IO;
 using System.Drawing;
+using System.Runtime.InteropServices;
+using System.Linq;
+using System.Diagnostics;
 using Microsoft.Win32;
 using ToastAlert.Config;
 using ToastAlert.Core;
@@ -10,11 +13,46 @@ using ToastAlert.Models;
 using ToastAlert.Services;
 using ToastAlert.UI;
 using ToastAlert.Utilities;
-using System.Linq;
+
 namespace ToastAlert
 {
     class Program
     {
+        [DllImport("kernel32.dll")]
+        static extern uint SetThreadExecutionState(uint esFlags);
+        [DllImport("kernel32.dll")]
+        static extern IntPtr GetConsoleWindow();
+        [DllImport("user32.dll")]
+        static extern IntPtr SendMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
+        [DllImport("kernel32.dll")]
+        static extern bool SetConsoleCtrlHandler(ConsoleCtrlDelegate handlerRoutine, bool add);
+
+        private const uint ES_CONTINUOUS = 0x80000000;
+        private const uint ES_SYSTEM_REQUIRED = 0x00000001;
+
+        delegate bool ConsoleCtrlDelegate(CtrlTypes ctrlType);
+        enum CtrlTypes
+        {
+            CTRL_C_EVENT = 0,
+            CTRL_BREAK_EVENT = 1,
+            CTRL_CLOSE_EVENT = 2,
+            CTRL_LOGOFF_EVENT = 5,
+            CTRL_SHUTDOWN_EVENT = 6
+        }
+
+        private static ConsoleCtrlDelegate? _consoleDelegate;
+
+        private static bool ConsoleCtrlHandler(CtrlTypes ctrlType)
+        {
+            if (ctrlType == CtrlTypes.CTRL_CLOSE_EVENT || ctrlType == CtrlTypes.CTRL_C_EVENT)
+            {
+                Console.WriteLine($"\n⚠️ Сигнал {ctrlType}. Принудительное завершение...");
+                // Принудительно убиваем процесс
+                Process.GetCurrentProcess().Kill();
+            }
+            return false;
+        }
+
         private static Config.Config? _config;
         private static Stats _stats = new();
         private static TtsService? _tts;
@@ -26,6 +64,11 @@ namespace ToastAlert
 
         static async Task Main(string[] args)
         {
+            _consoleDelegate = ConsoleCtrlHandler;
+            bool handlerSet = SetConsoleCtrlHandler(_consoleDelegate, true);
+            if (!handlerSet)
+                Console.WriteLine("⚠️ SetConsoleCtrlHandler не установлен!");
+
             Console.OutputEncoding = System.Text.Encoding.UTF8;
             SetConsoleTitleWithVersion();
             SetConsoleIcon();
@@ -104,25 +147,12 @@ namespace ToastAlert
             {
                 switch (args[i].ToLower())
                 {
-                    case "--help":
-                    case "-h":
-                        ShowHelp();
-                        return false;
-                    case "--test":
-                        TestTts();
-                        return false;
-                    case "--list":
-                        ShowConfig();
-                        return false;
-                    case "--add-sender":
-                        if (i + 1 < args.Length) AddSender(args[++i]);
-                        return false;
-                    case "--add-keyword":
-                        if (i + 1 < args.Length) AddKeyword(args[++i]);
-                        return false;
-                    case "--delete-mode":
-                        if (i + 1 < args.Length) SetDeleteMode(args[++i]);
-                        return false;
+                    case "--help": case "-h": ShowHelp(); return false;
+                    case "--test": TestTts(); return false;
+                    case "--list": ShowConfig(); return false;
+                    case "--add-sender": if (i + 1 < args.Length) AddSender(args[++i]); return false;
+                    case "--add-keyword": if (i + 1 < args.Length) AddKeyword(args[++i]); return false;
+                    case "--delete-mode": if (i + 1 < args.Length) SetDeleteMode(args[++i]); return false;
                 }
             }
             return true;
@@ -221,21 +251,10 @@ namespace ToastAlert
 
         private static void PreventSleep(bool prevent)
         {
-            const uint ES_CONTINUOUS = 0x80000000;
-            const uint ES_SYSTEM_REQUIRED = 0x00000001;
             if (prevent)
                 SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED);
             else
                 SetThreadExecutionState(ES_CONTINUOUS);
         }
-
-        [System.Runtime.InteropServices.DllImport("kernel32.dll")]
-        static extern uint SetThreadExecutionState(uint esFlags);
-
-        [System.Runtime.InteropServices.DllImport("user32.dll")]
-        static extern IntPtr GetConsoleWindow();
-
-        [System.Runtime.InteropServices.DllImport("user32.dll")]
-        static extern IntPtr SendMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
     }
 }

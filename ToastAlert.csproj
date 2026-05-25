@@ -6,16 +6,16 @@
     <PlatformTarget>x64</PlatformTarget>
     <ApplicationIcon>ta.ico</ApplicationIcon>
     
-    <!-- Версия 0.14.0 -->
-    <Version>0.14.0</Version>
-    <FileVersion>0.14.0</FileVersion>
-    <AssemblyVersion>0.14.0</AssemblyVersion>
+    <!-- Версия 0.14.1 -->
+    <Version>0.14.1</Version>
+    <FileVersion>0.14.1</FileVersion>
+    <AssemblyVersion>0.14.1</AssemblyVersion>
     <Product>Toast Alert Monitor</Product>
     <Description>Отправка уведомлений пока только из Telegram в Meshtastic. Рефакторинг, дедупликация, MQTT, TTS.</Description>
     <Company>Quantum Croak Industries</Company>
     <Copyright>🐸 2026 Quantum Croak CCBYNC4.0</Copyright>
     <Title>TelegramAlert</Title>
-    <InformationalVersion>0.14.0-20260525</InformationalVersion>
+    <InformationalVersion>0.14.1-20260525</InformationalVersion>
   </PropertyGroup>
 
   <ItemGroup>
