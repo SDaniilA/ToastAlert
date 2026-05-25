@@ -74,6 +74,7 @@ namespace ToastAlert.Config
         [JsonProperty("BeepDurationMs")] public int BeepDurationMs { get; set; } = 200;
         [JsonProperty("AbortPreviousSpeech")] public bool AbortPreviousSpeech { get; set; } = true;
         [JsonProperty("MinDelayBetweenMessagesMs")] public int MinDelayBetweenMessagesMs { get; set; } = 500;
+		[JsonProperty("VoiceName")] public string? VoiceName { get; set; } = null; // null = голос по умолчанию
     }
 
     public class DeleteConfig

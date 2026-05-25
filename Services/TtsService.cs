@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Speech.Synthesis;
 using ToastAlert.Config;
 using ToastAlert.Models;
@@ -13,6 +14,7 @@ namespace ToastAlert.Services
         private SpeechSynthesizer? _synthesizer;
         private readonly Stats _stats;
         private DateTime _lastSpeechTime = DateTime.MinValue;
+        private List<InstalledVoice>? _installedVoices;   // кэш голосов
 
         public bool IsMuted { get; set; }
 
@@ -39,16 +41,37 @@ namespace ToastAlert.Services
                 _synthesizer.Volume = _config.VoiceAlert.TtsVolume;
                 _stats.CurrentVolume = _config.VoiceAlert.TtsVolume;
 
-                foreach (var voice in _synthesizer.GetInstalledVoices())
+                // ---- Выбор голоса: сначала из конфига, затем русский по умолчанию ----
+                bool voiceSet = false;
+                if (!string.IsNullOrEmpty(_config.VoiceAlert.VoiceName))
                 {
-                    if (voice.VoiceInfo.Culture.Name.StartsWith("ru"))
+                    try
                     {
-                        _synthesizer.SelectVoice(voice.VoiceInfo.Name);
-                        Console.WriteLine($"🎤 Голос: {voice.VoiceInfo.Name}\n");
-                        break;
+                        _synthesizer.SelectVoice(_config.VoiceAlert.VoiceName);
+                        Console.WriteLine($"🎤 Голос из конфига: {_config.VoiceAlert.VoiceName}\n");
+                        voiceSet = true;
+                    }
+                    catch (Exception ex)
+                    {
+                        Console.WriteLine($"⚠️ Голос '{_config.VoiceAlert.VoiceName}' не найден: {ex.Message}");
                     }
                 }
-                if (_synthesizer.Voice == null)
+
+                if (!voiceSet)
+                {
+                    foreach (var voice in _synthesizer.GetInstalledVoices())
+                    {
+                        if (voice.VoiceInfo.Culture.Name.StartsWith("ru"))
+                        {
+                            _synthesizer.SelectVoice(voice.VoiceInfo.Name);
+                            Console.WriteLine($"🎤 Голос: {voice.VoiceInfo.Name}\n");
+                            voiceSet = true;
+                            break;
+                        }
+                    }
+                }
+
+                if (!voiceSet)
                     Console.WriteLine("🎤 Используется голос по умолчанию\n");
             }
             catch (Exception ex)
@@ -129,5 +152,47 @@ namespace ToastAlert.Services
         public void UpdateLastSpeechTime() => _lastSpeechTime = DateTime.Now;
 
         public void Dispose() => _synthesizer?.Dispose();
+
+        // ---------- Новые методы для работы с голосами ----------
+
+        public List<(string Name, string Culture, bool IsDefault)> GetVoicesList()
+        {
+            if (_synthesizer == null) return new List<(string, string, bool)>();
+            if (_installedVoices == null)
+                _installedVoices = _synthesizer.GetInstalledVoices().ToList();
+
+            var currentVoice = _synthesizer.Voice;
+            return _installedVoices.Select(v => (
+                Name: v.VoiceInfo.Name,
+                Culture: v.VoiceInfo.Culture.DisplayName,
+                IsDefault: currentVoice != null && v.VoiceInfo.Name == currentVoice.Name
+            )).ToList();
+        }
+
+        public bool SelectVoiceByName(string name)
+        {
+            if (_synthesizer == null) return false;
+            try
+            {
+                _synthesizer.SelectVoice(name);
+                _config.VoiceAlert.VoiceName = name;
+                // Сохраняем конфиг сразу
+                ConfigLoader.Save(_config);
+                Console.WriteLine($"🎤 Голос изменён на: {name}");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"⚠️ Не удалось выбрать голос: {ex.Message}");
+                return false;
+            }
+        }
+
+        public bool SelectVoiceByIndex(int index)
+        {
+            var voices = GetVoicesList();
+            if (index < 0 || index >= voices.Count) return false;
+            return SelectVoiceByName(voices[index].Name);
+        }
     }
 }

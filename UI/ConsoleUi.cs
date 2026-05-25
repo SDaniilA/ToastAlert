@@ -26,6 +26,51 @@ namespace ToastAlert.UI
             _stats = stats;
         }
 
+		private void ShowVoiceMenu()
+		{
+			var voices = _tts.GetVoicesList();
+			if (voices.Count == 0)
+			{
+				Console.WriteLine("\n🎤 Нет доступных голосов TTS.");
+				return;
+			}
+
+			Console.WriteLine("\n🎤 Доступные голоса (введите номер):");
+			for (int i = 0; i < voices.Count; i++)
+			{
+				string marker = voices[i].IsDefault ? " [текущий]" : "";
+				Console.WriteLine($"   {i + 1}. {voices[i].Name} ({voices[i].Culture}){marker}");
+			}
+			Console.Write("Ваш выбор (1-{0}) или '0' для отмены: ", voices.Count);
+
+			// Читаем строку целиком
+			string? input = Console.ReadLine();
+			if (string.IsNullOrEmpty(input)) return;
+
+			if (int.TryParse(input, out int num))
+			{
+				if (num >= 1 && num <= voices.Count)
+				{
+					if (_tts.SelectVoiceByIndex(num - 1))
+					{
+						Console.WriteLine($"\n✅ Голос переключён на {voices[num - 1].Name}");
+					}
+				}
+				else if (num == 0)
+				{
+					Console.WriteLine("\nОтмена.");
+				}
+				else
+				{
+					Console.WriteLine("\n❌ Неверный номер.");
+				}
+			}
+			else
+			{
+				Console.WriteLine("\n❌ Введите число.");
+			}
+		}
+
         public async Task HandleKeyboardAsync()
         {
             await Task.Run(() => { }); // принудительный async, убирает CS1998
@@ -71,15 +116,23 @@ namespace ToastAlert.UI
                         _dedup.ClearBuffer();
                         Console.WriteLine("\n🧹 Буфер дедупликации очищен");
                     }
-                    else if (key.Key == ConsoleKey.H || key.Key == ConsoleKey.F1)   // НОВАЯ КЛАВИША
-                    {
-                        ShowHelp();
-                    }
                     else if (key.Key.ToString() == muteKey)
                     {
                         _tts.IsMuted = !_tts.IsMuted;
                         Console.WriteLine($"\n🔇 Звук {(_tts.IsMuted ? "ВЫКЛЮЧЕН" : "ВКЛЮЧЕН")}");
                     }
+					else if (key.Key == ConsoleKey.H || key.Key == ConsoleKey.F1)   // НОВАЯ КЛАВИША
+                    {
+                        ShowHelp();
+                    }
+					else if (key.Key == ConsoleKey.F2)
+					{
+						ShowVoiceMenu();
+					}
+					else if (key.Key == ConsoleKey.F3)
+					{
+						ShowTestMenu();
+					}
                     else if (key.Key == ConsoleKey.Escape)
                     {
                         _isRunning = false;
@@ -169,6 +222,8 @@ namespace ToastAlert.UI
     Q           - Вкл/Выкл MQTT
     D           - Очистить буфер дедупликации
     H / F1      - Показать эту справку
+	F2          - Список голосов TTS / смена голоса
+    F3          - Тестовое меню (голос, MQTT)
 ");
         }
 
@@ -176,7 +231,7 @@ namespace ToastAlert.UI
         {
             Console.WriteLine(@"
 ╔══════════════════════════════════════════════════════════════╗
-║        TOAST ALERT MONITOR v13.0 - Refactored v1             ║
+║        TOAST ALERT MONITOR v14.0 - Refactored v1             ║
 ║     Мониторинг через центр уведомлений Windows               ║
 ╚══════════════════════════════════════════════════════════════╝");
             Console.WriteLine($"   🕐 Запуск: {DateTime.Now:HH:mm:ss}");
@@ -188,5 +243,61 @@ namespace ToastAlert.UI
             Console.WriteLine($"   🔊 Громкость TTS: {_stats.CurrentVolume}%");
             Console.WriteLine($"   📡 MQTT: {(_config.Mqtt.Enabled && _config.Additional.MqttEnabled ? "Вкл" : "Выкл")}\n");
         }
+		
+		private void ShowTestMenu()
+		{
+			Console.WriteLine("\n🧪 МЕНЮ ТЕСТА:");
+			Console.WriteLine("   1. Тест голоса (TTS)");
+			Console.WriteLine("   2. Тест MQTT связи");
+			Console.WriteLine("   3. Тест уведомлений (имитация)");
+			Console.WriteLine("   0. Выход");
+			Console.Write("Ваш выбор: ");
+
+			string? input = Console.ReadLine();
+			if (string.IsNullOrEmpty(input)) return;
+
+			switch (input)
+			{
+				case "1":
+					TestTts();
+					break;
+				case "2":
+					TestMqtt();
+					break;
+				case "3":
+					TestNotification();
+					break;
+				case "0":
+					Console.WriteLine("Отмена.");
+					break;
+				default:
+					Console.WriteLine("❌ Неверный выбор.");
+					break;
+			}
+		}
+
+		private void TestTts()
+		{
+			Console.WriteLine("\n🔊 Тест голоса...");
+			_tts.Speak("Проверка голосового оповещения. Если вы это слышите, всё работает.", false);
+			// небольшая задержка, чтобы речь не оборвалась
+			Task.Delay(2000).Wait();
+			Console.WriteLine("✅ Тест завершён");
+		}
+
+		private async void TestMqtt()
+		{
+			Console.WriteLine("\n📡 Тест MQTT...");
+			await _mqtt.PublishAsync("Тест", "Проверка связи через MQTT");
+			Console.WriteLine("✅ Тест отправлен (если MQTT включён и подключён)");
+		}
+
+		private void TestNotification()
+		{
+			Console.WriteLine("\n💬 Имитация уведомления...");
+			// Вызываем внутреннюю обработку с фейковыми данными (можно через _monitor, но проще просто вывести в консоль)
+			Console.WriteLine("   [Тест] Отправитель: Система, Сообщение: Проверка мониторинга");
+			// При желании можно сгенерировать фейковое уведомление и пропустить через ProcessMessage, но это сложнее.
+		}
     }
 }
