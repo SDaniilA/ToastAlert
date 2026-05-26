@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Linq;
 using Newtonsoft.Json;
 using System.Collections.Generic;
 
@@ -9,7 +10,7 @@ namespace ToastAlert.Config
     {
         private static readonly object _lock = new object();
 
-        public static Config Load(string configPath = "config.json")
+        public static Config? Load(string configPath = "config.json", bool suppressExit = false)
         {
             string backupPath = configPath + ".bak";
 
@@ -23,6 +24,23 @@ namespace ToastAlert.Config
             try
             {
                 var json = File.ReadAllText(configPath);
+                // Валидация синтаксиса JSON
+                try
+                {
+                    Newtonsoft.Json.Linq.JObject.Parse(json);
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"⚠️ Синтаксическая ошибка в config.json: {ex.Message}");
+                    if (!suppressExit)
+                    {
+                        Console.WriteLine("   Исправьте ошибку и перезапустите программу.");
+                        Console.ReadKey();
+                        Environment.Exit(1);
+                    }
+                    return null;
+                }
+
                 var cfg = JsonConvert.DeserializeObject<Config>(json);
                 if (cfg != null)
                 {
@@ -44,16 +62,25 @@ namespace ToastAlert.Config
                             return cfg;
                         }
                     }
-                    throw new InvalidOperationException("Не удалось загрузить конфигурацию ни из основного файла, ни из бэкапа.");
+                    Console.WriteLine("❌ Не удалось загрузить конфигурацию ни из основного файла, ни из бэкапа.");
+                    if (!suppressExit)
+                    {
+                        Console.ReadKey();
+                        Environment.Exit(1);
+                    }
+                    return null;
                 }
             }
             catch (Exception ex)
             {
                 Console.WriteLine($"❌ Критическая ошибка загрузки конфига: {ex.Message}");
-                Console.WriteLine("Нажмите любую клавишу для выхода...");
-                Console.ReadKey();
-                Environment.Exit(1);
-                return null!;
+                if (!suppressExit)
+                {
+                    Console.WriteLine("Нажмите любую клавишу для выхода...");
+                    Console.ReadKey();
+                    Environment.Exit(1);
+                }
+                return null;
             }
         }
 
@@ -79,22 +106,41 @@ namespace ToastAlert.Config
         }
 
         private static void SetDefaults(Config cfg)
-        {
-            cfg.TextCleaning ??= new CleanTextConfig();
-            cfg.Abbreviations ??= new AbbrevConfig();
-            cfg.Priorities ??= new PriorityConfig();
-            cfg.Abbreviations.CustomAbbreviations ??= new Dictionary<string, string>();
-            cfg.Filtering.ListB ??= new List<string>();
-            cfg.Filtering.ListC ??= new List<string>();
-            if (string.IsNullOrEmpty(cfg.Filtering.Operator)) cfg.Filtering.Operator = "И";
-            cfg.Filtering.BlacklistedSenders ??= new List<string>();
-            cfg.Filtering.BlacklistedKeywords ??= new List<string>();
-            cfg.TextCleaning.CustomAdsToRemove ??= new List<string>();
-            cfg.Mqtt ??= new MqttConfig();
-            if (cfg.Mqtt.MaxPayloadBytes == 0) cfg.Mqtt.MaxPayloadBytes = 100;
-            cfg.Deduplication ??= new DedupConfig();
-            if (string.IsNullOrEmpty(cfg.Mqtt.ClientId)) cfg.Mqtt.ClientId = $"telegram_alert_{Environment.MachineName}";
-        }
+		{
+			cfg.TextCleaning ??= new CleanTextConfig();
+			cfg.Abbreviations ??= new AbbrevConfig();
+			cfg.Priorities ??= new PriorityConfig();
+			cfg.Abbreviations.CustomAbbreviations ??= new Dictionary<string, string>();
+			cfg.Filtering.ListB ??= new List<string>();
+			cfg.Filtering.ListC ??= new List<string>();
+			if (string.IsNullOrEmpty(cfg.Filtering.Operator)) cfg.Filtering.Operator = "И";
+			cfg.Filtering.BlacklistedSenders ??= new List<string>();
+			cfg.Filtering.BlacklistedKeywords ??= new List<string>();
+			cfg.TextCleaning.CustomAdsToRemove ??= new List<string>();
+			cfg.Mqtt ??= new MqttConfig();
+			if (cfg.Mqtt.MaxPayloadBytes == 0) cfg.Mqtt.MaxPayloadBytes = 100;
+			cfg.Deduplication ??= new DedupConfig();
+			// Уникальный ClientId для предотвращения конфликта экземпляров
+			if (string.IsNullOrEmpty(cfg.Mqtt.ClientId))
+				cfg.Mqtt.ClientId = $"telegram_alert_{Environment.MachineName}_{new Random().Next(1000, 9999)}";
+
+			// Обработка AllowedApps с удалением дублей
+			if (cfg.Monitoring.AllowedApps == null)
+			{
+				// Старый конфиг без поля – добавляем Telegram по умолчанию
+				cfg.Monitoring.AllowedApps = new List<string> { "Telegram" };
+			}
+			else
+			{
+				// Удаляем возможные дубликаты
+				cfg.Monitoring.AllowedApps = cfg.Monitoring.AllowedApps.Distinct().ToList();
+				
+				if (cfg.Monitoring.AllowedApps.Count == 0)
+				{
+					Console.WriteLine("⚠️ Внимание: список AllowedApps пуст. Будут обрабатываться уведомления от ВСЕХ приложений.");
+				}
+			}
+		}
 
         private static Config GetDefault()
         {
@@ -126,7 +172,6 @@ namespace ToastAlert.Config
                     Enabled = true,
                     CustomAbbreviations = new Dictionary<string, string>
                     {
-                        
                         { "ЧС", "Чэ Эс" },
                         { "МЧС", "Эм Чэ Эс" },
                         { "МО", "Эм О" },
@@ -136,7 +181,7 @@ namespace ToastAlert.Config
                 Logging = new LogConfig(),
                 Sounds = new SoundConfig(),
                 Additional = new ExtraConfig { MqttEnabled = true },
-                Priorities = new PriorityConfig { PriorityKeywords = new List<string> {} },
+                Priorities = new PriorityConfig { PriorityKeywords = new List<string> { } },
                 HealthCheck = new HealthConfig(),
                 Mqtt = new MqttConfig { Enabled = false },
                 Deduplication = new DedupConfig()

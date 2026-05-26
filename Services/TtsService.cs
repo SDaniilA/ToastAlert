@@ -24,6 +24,11 @@ namespace ToastAlert.Services
             _stats = stats;
         }
 
+		public string? GetCurrentVoiceName()
+		{
+			return _synthesizer?.Voice?.Name;
+		}
+
         public void Initialize()
         {
             if (!_config.VoiceAlert.Enabled)

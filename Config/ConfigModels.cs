@@ -37,6 +37,7 @@ namespace ToastAlert.Config
         [JsonProperty("ConsoleOutputEnabled")] public bool ConsoleOutputEnabled { get; set; } = true;
         [JsonProperty("ConsoleMaxMessageLength")] public int ConsoleMaxMessageLength { get; set; } = 0;
         [JsonProperty("ConsoleBeepOnMessage")] public bool ConsoleBeepOnMessage { get; set; } = true;
+		[JsonProperty("AllowedApps")] public List<string>? AllowedApps { get; set; }
     }
 
     public class FilterConfig

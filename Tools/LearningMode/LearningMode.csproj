@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <PlatformTarget>x64</PlatformTarget>
+	<ApplicationIcon>learning.ico</ApplicationIcon>
+	<!-- Версия 0.1.0 -->
+    <Version>0.1.0</Version>
+    <FileVersion>0.1.0</FileVersion>
+    <AssemblyVersion>0.1.0</AssemblyVersion>
+    <Product>Toast Learning Tool</Product>
+    <Description>Мониторинг и логирование программ отправивших оповещения.</Description>
+    <Company>Quantum Croak Industries</Company>
+    <Copyright>🐸 2026 Quantum Croak CCBYNC4.0</Copyright>
+    <Title>ToastLearningTool</Title>
+    <InformationalVersion>0.1.0-20260526</InformationalVersion>
+	
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Windows.CsWinRT" Version="2.0.4" />
+  </ItemGroup>
+</Project>

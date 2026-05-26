@@ -149,7 +149,22 @@ namespace ToastAlert.Core
                     if (alreadyProcessed) continue;
 
                     string appName = notif.AppInfo.DisplayInfo.DisplayName;
-                    if (string.IsNullOrEmpty(appName) || !appName.Contains("Telegram", StringComparison.OrdinalIgnoreCase)) continue;
+					if (string.IsNullOrEmpty(appName)) continue;
+
+					var allowedApps = _config.Monitoring.AllowedApps;
+					if (allowedApps.Count > 0)
+					{
+						bool allowed = false;
+						foreach (var allowedApp in allowedApps)
+						{
+							if (appName.Contains(allowedApp, StringComparison.OrdinalIgnoreCase))
+							{
+								allowed = true;
+								break;
+							}
+						}
+						if (!allowed) continue;
+					}
 
                     var (sender, message) = ParseNotification(notif);
                     if (string.IsNullOrEmpty(sender) || string.IsNullOrEmpty(message)) continue;

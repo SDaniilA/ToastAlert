@@ -89,9 +89,9 @@ namespace ToastAlert
             if (!ParseArgs(args)) return;
             if (_config.Additional.PreventSleep)
                 PreventSleep(true);
-
-            _ui.PrintBanner();
+            
             _tts.Initialize();
+			_ui.PrintBanner();
             _monitor.LoadProcessedIds();
             await _mqtt.InitializeAsync();
 
