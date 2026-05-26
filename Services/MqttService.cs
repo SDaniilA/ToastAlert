@@ -37,6 +37,21 @@ namespace ToastAlert.Services
                 return;
             }
 
+            // Останавливаем reconnect таймер, если он запущен
+            StopReconnectTimer();
+
+            // Если есть старый клиент, освобождаем его
+            if (_client != null)
+            {
+                try
+                {
+                    await _client.DisconnectAsync();
+                    _client.Dispose();
+                }
+                catch { }
+                _client = null;
+            }
+
             try
             {
                 var factory = new MqttFactory();
@@ -105,7 +120,7 @@ namespace ToastAlert.Services
 
         private async Task TryReconnect()
         {
-            if (_connected || _manualDisconnect)
+            if (_connected || _manualDisconnect || _client == null)
             {
                 StopReconnectTimer();
                 return;
@@ -123,7 +138,6 @@ namespace ToastAlert.Services
             Console.WriteLine($"🔄 MQTT: попытка переподключения #{_reconnectAttempts}...");
             try
             {
-                if (_client == null) return;
                 var options = new MqttClientOptionsBuilder()
                     .WithTcpServer(_config.Mqtt.Broker, _config.Mqtt.Port)
                     .WithClientId(_config.Mqtt.ClientId)
@@ -174,34 +188,33 @@ namespace ToastAlert.Services
             catch (Exception ex) { Console.WriteLine($"   ⚠️ MQTT публикация: {ex.Message}"); }
         }
 
-		public async Task DisconnectAsync()
-		{
-			if (_client != null && _connected)
-			{
-				_manualDisconnect = true;
-				try
-				{
-					// Таймаут 1 секунда на отключение
-					var disconnectTask = _client.DisconnectAsync();
-					await Task.WhenAny(disconnectTask, Task.Delay(1000));
-					_client.DisconnectedAsync -= OnDisconnected;
-					_client.Dispose();
-					Console.WriteLine("   ✅ MQTT отключён");
-				}
-				finally
-				{
-					_manualDisconnect = false;
-					_connected = false;
-				}
-			}
-		}
+        public async Task DisconnectAsync()
+        {
+            StopReconnectTimer(); // останавливаем reconnect таймер
+            if (_client != null && _connected)
+            {
+                _manualDisconnect = true;
+                try
+                {
+                    await _client.DisconnectAsync();
+                }
+                catch { }
+                finally
+                {
+                    _client.Dispose();
+                    _client = null;
+                    _connected = false;
+                    _manualDisconnect = false;
+                }
+            }
+            Console.WriteLine("   ✅ MQTT отключён");
+        }
 
         public async Task ToggleAsync()
         {
             if (_connected)
             {
                 await DisconnectAsync();
-                _connected = false;
                 _config.Additional.MqttEnabled = false;
                 ConfigLoader.Save(_config);
                 Console.WriteLine("\n❌ MQTT ВЫКЛЮЧЁН");

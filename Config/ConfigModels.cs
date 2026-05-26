@@ -147,6 +147,7 @@ namespace ToastAlert.Config
         [JsonProperty("RememberVolume")] public bool RememberVolume { get; set; } = true;
         [JsonProperty("MqttEnabled")] public bool MqttEnabled { get; set; } = true;
         [JsonProperty("PreventSleep")] public bool PreventSleep { get; set; } = false;
+		[JsonProperty("UseWindowsTerminal")] public bool UseWindowsTerminal { get; set; } = true;
     }
 
     public class PriorityConfig

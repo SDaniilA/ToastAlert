@@ -67,7 +67,7 @@ namespace ToastAlert
             return false;
         }
 
-        private static void DisableConsoleMouseInterference()
+/*         private static void DisableConsoleMouseInterference()
         {
             try
             {
@@ -87,8 +87,8 @@ namespace ToastAlert
                     SetConsoleMode(consoleHandle, mode);
                 }
             }
-            catch { }
-        }
+            catch { } */
+
 
         private static Config.Config? _config;
         private static Stats _stats = new();
@@ -101,7 +101,31 @@ namespace ToastAlert
 
         static async Task Main(string[] args)
         {
-            DisableConsoleMouseInterference();
+/*             //попытка в Windows terminal
+			
+			// Автоматический перезапуск в Windows Terminal (если установлен)
+			if (Environment.GetEnvironmentVariable("WT_SESSION") == null)
+			{
+				try
+				{
+					var psi = new ProcessStartInfo
+					{
+						FileName = "wt.exe",
+						Arguments = $"--window 0 new-tab --title \"Toast Alert\" -d \"{AppContext.BaseDirectory.TrimEnd('\\')}\" \"{Environment.ProcessPath}\" {string.Join(" ", args.Select(a => $"\"{a}\""))}",
+						UseShellExecute = false,
+						CreateNoWindow = true
+					};
+					Process.Start(psi);
+					return;
+				}
+				catch
+        {
+            // Windows Terminal не установлен – продолжаем в обычной консоли
+        } 
+		}*/
+
+			//
+			//DisableConsoleMouseInterference();
 
             _consoleDelegate = ConsoleCtrlHandler;
             SetConsoleCtrlHandler(_consoleDelegate, true);
@@ -114,7 +138,23 @@ namespace ToastAlert
 
             _config = ConfigLoader.Load();
             if (_config == null) return;
-
+			// Автоматический перезапуск в Windows Terminal
+			if (_config.Additional.UseWindowsTerminal && Environment.GetEnvironmentVariable("WT_SESSION") == null)
+			{
+				try
+				{
+					var psi = new ProcessStartInfo
+					{
+						FileName = "wt.exe",
+						Arguments = $"--window 0 new-tab --title \"Toast Alert\" -d \"{AppContext.BaseDirectory.TrimEnd('\\')}\" \"{Environment.ProcessPath}\" {string.Join(" ", args.Select(a => $"\"{a}\""))}",
+						UseShellExecute = false,
+						CreateNoWindow = true
+					};
+					Process.Start(psi);
+					return;
+				}
+				catch { }
+			}
             _stats.CurrentVolume = _config.VoiceAlert.TtsVolume;
             _tts = new TtsService(_config, _stats);
             _mqtt = new MqttService(_config, _stats);
