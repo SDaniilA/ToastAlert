@@ -5,16 +5,16 @@
     <Nullable>enable</Nullable>
     <PlatformTarget>x64</PlatformTarget>
 	<ApplicationIcon>learning.ico</ApplicationIcon>
-	<!-- Версия 0.1.0 -->
-    <Version>0.1.0</Version>
-    <FileVersion>0.1.0</FileVersion>
-    <AssemblyVersion>0.1.0</AssemblyVersion>
+	<!-- Версия 0.1.1 -->
+    <Version>0.1.1</Version>
+    <FileVersion>0.1.1</FileVersion>
+    <AssemblyVersion>0.1.1</AssemblyVersion>
     <Product>Toast Learning Tool</Product>
     <Description>Мониторинг и логирование программ отправивших оповещения.</Description>
     <Company>Quantum Croak Industries</Company>
     <Copyright>🐸 2026 Quantum Croak CCBYNC4.0</Copyright>
     <Title>ToastLearningTool</Title>
-    <InformationalVersion>0.1.0-20260526</InformationalVersion>
+    <InformationalVersion>0.1.1-20260526</InformationalVersion>
 	
   </PropertyGroup>
   <ItemGroup>

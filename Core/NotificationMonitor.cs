@@ -292,8 +292,8 @@ namespace ToastAlert.Core
                 if (cfg.Monitoring.ConsoleOutputEnabled)
                 {
                     if (!isAllowed) Console.WriteLine($"[{DateTime.Now:HH:mm:ss}]  ⏭️ Отправитель не в списке");
-                    else if (_tts.IsMuted) Console.WriteLine($"   🔇 Звук отключен (M)");
                     else if (!shouldSpeak) Console.WriteLine($"   ⏭️ Нет ключевых слов");
+					else if (_tts.IsMuted) Console.WriteLine($"   🔇 Звук отключен (M)");
                     else if (!_tts.CanSpeakNow()) Console.WriteLine($"   ⏳ Задержка {cfg.VoiceAlert.MinDelayBetweenMessagesMs}мс");
                 }
             }
