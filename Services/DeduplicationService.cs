@@ -16,10 +16,15 @@ namespace ToastAlert.Services
         public DeduplicationService(Config.Config config)
         {
             _config = config;
+            // Убедимся, что пороги имеют разумные значения
+            if (_config.Deduplication.SimilarityThresholdHigh <= _config.Deduplication.SimilarityThresholdLow)
+            {
+                _config.Deduplication.SimilarityThresholdHigh = 0.95;
+                _config.Deduplication.SimilarityThresholdLow = 0.85;
+            }
         }
 
         public bool IsDuplicate(string text, string sender, out double similarity, out string dupSender, out string? dupOriginalMessage)
-		//public bool IsDuplicate(string text, string sender, out double similarity, out string dupSender, out string? dupOriginalMessage)
         {
             similarity = 0;
             dupSender = null!;
@@ -33,7 +38,6 @@ namespace ToastAlert.Services
             {
                 CleanOldMessages();
 
-                // точное совпадение хэша
                 var exact = _buffer.Find(m => m.Hash == hash);
                 if (exact != null)
                 {
@@ -43,7 +47,6 @@ namespace ToastAlert.Services
                     return true;
                 }
 
-                // Левенштейн
                 if (_config.Deduplication.UseLevenshtein)
                 {
                     double best = 0;
@@ -53,12 +56,25 @@ namespace ToastAlert.Services
                         double sim = StringUtilities.LevenshteinSimilarity(normalized, m.NormalizedText);
                         if (sim > best) { best = sim; bestMsg = m; }
                     }
-                    if (best >= _config.Deduplication.SimilarityThresholdHigh)
+                    double high = _config.Deduplication.SimilarityThresholdHigh;
+                    double low = _config.Deduplication.SimilarityThresholdLow;
+                    if (best >= high)
                     {
                         similarity = best;
                         dupSender = bestMsg?.OriginalSender ?? string.Empty;
-						dupOriginalMessage = bestMsg?.OriginalMessage ?? string.Empty;
+                        dupOriginalMessage = bestMsg?.OriginalMessage ?? string.Empty;
                         return true;
+                    }
+                    else if (best >= low && best < high && bestMsg != null)
+                    {
+                        double jaccard = StringUtilities.JaccardSimilarity(normalized, bestMsg.NormalizedText);
+                        if (jaccard >= high)
+                        {
+                            similarity = best;
+                            dupSender = bestMsg.OriginalSender;
+                            dupOriginalMessage = bestMsg.OriginalMessage;
+                            return true;
+                        }
                     }
                     similarity = best;
                 }

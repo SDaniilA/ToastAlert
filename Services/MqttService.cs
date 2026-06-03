@@ -22,11 +22,80 @@ namespace ToastAlert.Services
         private readonly object _reconnectLock = new();
         private bool _manualDisconnect = false;
         private readonly Stats _stats;
+        private Mutex? _clientIdMutex;
 
         public MqttService(Config.Config config, Stats stats)
         {
             _config = config;
             _stats = stats;
+        }
+
+        public async Task<bool> CheckAndResolveConflictAsync()
+        {
+            if (!_config.Mqtt.Enabled || !_config.Additional.MqttEnabled)
+                return false;
+
+            string mutexName = $"MqttClient_{_config.Mqtt.ClientId}";
+            bool createdNew = false;
+            try
+            {
+                _clientIdMutex = new Mutex(true, mutexName, out createdNew);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"⚠️ Ошибка создания мьютекса: {ex.Message}");
+                createdNew = false;
+                _clientIdMutex = null;
+            }
+
+            if (createdNew)
+            {
+                Console.WriteLine($"✅ Мьютекс для ClientId = {_config.Mqtt.ClientId} захвачен.");
+                await Task.CompletedTask;
+                return true;
+            }
+            else
+            {
+                if (_clientIdMutex != null)
+                {
+                    _clientIdMutex.Dispose();
+                    _clientIdMutex = null;
+                }
+
+                Console.WriteLine($"\n⚠️ MQTT: другой экземпляр уже использует ClientId = {_config.Mqtt.ClientId}");
+                Console.Write("   Сгенерировать новый уникальный ID? (Y/N, Enter = N): ");
+                var key = Console.ReadKey(true);
+                if (key.Key == ConsoleKey.Y)
+                {
+                    string newId = $"telegram_alert_{Environment.MachineName}_{Guid.NewGuid():N}";
+                    if (newId.Length > 23) newId = newId.Substring(0, 23);
+                    _config.Mqtt.ClientId = newId;
+                    ConfigLoader.Save(_config);
+                    Console.WriteLine($"\n✅ Сгенерирован новый ClientId: {newId}");
+                    string newMutexName = $"MqttClient_{_config.Mqtt.ClientId}";
+                    try
+                    {
+                        _clientIdMutex = new Mutex(true, newMutexName, out createdNew);
+                        await Task.CompletedTask;
+                        return createdNew;
+                    }
+                    catch
+                    {
+                        await Task.CompletedTask;
+                        return false;
+                    }
+                }
+                else
+                {
+                    Console.WriteLine("\n   MQTT будет отключён (режим теста без отправки).");
+                    _config.Mqtt.Enabled = false;
+                    _config.Additional.MqttEnabled = false;
+                    _config.Mqtt.TestMode = true;
+                    ConfigLoader.Save(_config);
+                    await Task.CompletedTask;
+                    return false;
+                }
+            }
         }
 
         public async Task InitializeAsync()
@@ -37,10 +106,8 @@ namespace ToastAlert.Services
                 return;
             }
 
-            // Останавливаем reconnect таймер, если он запущен
             StopReconnectTimer();
 
-            // Если есть старый клиент, освобождаем его
             if (_client != null)
             {
                 try
@@ -157,23 +224,62 @@ namespace ToastAlert.Services
 
         public async Task PublishAsync(string sender, string message)
         {
-            if (!_config.Mqtt.Enabled || _client == null || !_connected) return;
-            string mqttText = StringUtilities.SanitizeForMqtt(sender, message, _config.Mqtt.MaxPayloadBytes);
-            var payload = new
+            // Тестовый режим — работает без подключения и без проверки Enabled
+            if (_config.Mqtt.TestMode)
+            {
+                string mqttText = StringUtilities.SanitizeForMqtt(sender, message, _config.Mqtt.MaxPayloadBytes);
+                int originalLen = Encoding.UTF8.GetBytes(message).Length;
+                int truncatedLen = Encoding.UTF8.GetBytes(mqttText).Length;
+                if (truncatedLen < originalLen)
+                {
+                    Console.ForegroundColor = ConsoleColor.Yellow;
+                    Console.WriteLine($"   📏 [TEST] сообщение обрезано: {originalLen} → {truncatedLen} байт (лимит {_config.Mqtt.MaxPayloadBytes})");
+                    Console.ResetColor();
+                }
+                else
+                {
+                    Console.WriteLine($"📏 [TEST] сообщение  {originalLen} → {truncatedLen} байт (лимит {_config.Mqtt.MaxPayloadBytes})");
+                }
+
+                var payload = new
+                {
+                    from = _config.Mqtt.FromNodeId,
+                    to = _config.Mqtt.ToNodeId,
+                    channel = _config.Mqtt.ChannelIndex,
+                    type = "sendtext",
+                    payload = mqttText,
+                    hopLimit = 3
+                };
+                string jsonPayload = JsonConvert.SerializeObject(payload);
+                Console.ForegroundColor = ConsoleColor.Blue;
+                Console.WriteLine($"   📡 [TEST MODE] MQTT payload: {jsonPayload}");
+                Console.ResetColor();
+                return;
+            }
+
+            // Реальная отправка — требуются оба флага и активное подключение
+            if (!_config.Mqtt.Enabled || !_config.Additional.MqttEnabled)
+                return;
+            if (_client == null || !_connected)
+                return;
+
+            string mqttTextReal = StringUtilities.SanitizeForMqtt(sender, message, _config.Mqtt.MaxPayloadBytes);
+            var payloadReal = new
             {
                 from = _config.Mqtt.FromNodeId,
                 to = _config.Mqtt.ToNodeId,
                 channel = _config.Mqtt.ChannelIndex,
                 type = "sendtext",
-                payload = mqttText,
+                payload = mqttTextReal,
                 hopLimit = 3
             };
-            string jsonPayload = JsonConvert.SerializeObject(payload);
+            string jsonPayloadReal = JsonConvert.SerializeObject(payloadReal);
+
             try
             {
                 var appMsg = new MqttApplicationMessageBuilder()
                     .WithTopic(_config.Mqtt.Topic)
-                    .WithPayload(Encoding.UTF8.GetBytes(jsonPayload))
+                    .WithPayload(Encoding.UTF8.GetBytes(jsonPayloadReal))
                     .WithQualityOfServiceLevel(MQTTnet.Protocol.MqttQualityOfServiceLevel.AtLeastOnce)
                     .Build();
                 await _client.PublishAsync(appMsg);
@@ -190,7 +296,7 @@ namespace ToastAlert.Services
 
         public async Task DisconnectAsync()
         {
-            StopReconnectTimer(); // останавливаем reconnect таймер
+            StopReconnectTimer();
             if (_client != null && _connected)
             {
                 _manualDisconnect = true;
@@ -206,6 +312,17 @@ namespace ToastAlert.Services
                     _connected = false;
                     _manualDisconnect = false;
                 }
+            }
+            // Освобождаем мьютекс в любом случае
+            if (_clientIdMutex != null)
+            {
+                try
+                {
+                    _clientIdMutex.ReleaseMutex();
+                }
+                catch (ApplicationException) { }
+                _clientIdMutex.Dispose();
+                _clientIdMutex = null;
             }
             Console.WriteLine("   ✅ MQTT отключён");
         }

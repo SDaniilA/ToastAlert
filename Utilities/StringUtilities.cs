@@ -1,8 +1,10 @@
 using System;
+using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Security.Cryptography;
 using ToastAlert.Config;
+using System.Collections.Generic;
 
 namespace ToastAlert.Utilities
 {
@@ -76,6 +78,22 @@ namespace ToastAlert.Utilities
             int maxLen = Math.Max(s1.Length, s2.Length);
             if (maxLen == 0) return 1.0;
             return 1.0 - (double)LevenshteinDistance(s1, s2) / maxLen;
+        }
+
+        public static double JaccardSimilarity(string s1, string s2)
+        {
+            if (string.IsNullOrEmpty(s1) || string.IsNullOrEmpty(s2)) return 0;
+            var hashSet1 = new HashSet<string>(GetBigrams(s1));
+            var hashSet2 = new HashSet<string>(GetBigrams(s2));
+            int intersection = hashSet1.Intersect(hashSet2).Count();
+            int union = hashSet1.Union(hashSet2).Count();
+            return union == 0 ? 0 : (double)intersection / union;
+        }
+
+        private static IEnumerable<string> GetBigrams(string text)
+        {
+            for (int i = 0; i < text.Length - 1; i++)
+                yield return text.Substring(i, 2);
         }
 
         public static string TruncateToBytes(string text, int maxBytes)

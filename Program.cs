@@ -6,6 +6,7 @@ using System.Drawing;
 using System.Runtime.InteropServices;
 using System.Linq;
 using System.Diagnostics;
+using System.Threading;
 using Microsoft.Win32;
 using ToastAlert.Config;
 using ToastAlert.Core;
@@ -56,39 +57,27 @@ namespace ToastAlert
         }
 
         private static ConsoleCtrlDelegate? _consoleDelegate;
+        private static CancellationTokenSource? _cts;
+        private static Task? _monitorTask;
+        private static EasterEggService? _easterEgg;
 
         private static bool ConsoleCtrlHandler(CtrlTypes ctrlType)
         {
             if (ctrlType == CtrlTypes.CTRL_CLOSE_EVENT || ctrlType == CtrlTypes.CTRL_C_EVENT)
             {
-                Console.WriteLine($"\n⚠️ Сигнал {ctrlType}. Принудительное завершение...");
-                Process.GetCurrentProcess().Kill();
+                if (_easterEgg != null && _easterEgg.ShouldBlockExit)
+                {
+                    Console.WriteLine("\n⚠️ НЕЛЬЗЯ ОСТАНОВИТЬ ПАРТИЮ. ПРОДОЛЖАЙТЕ РАБОТАТЬ");
+                    return true;
+                }
+                Console.WriteLine($"\n⚠️ Сигнал {ctrlType}. Завершение работы...");
+                _cts?.Cancel();
+                if (_monitorTask != null)
+                    Task.WhenAny(_monitorTask, Task.Delay(5000)).Wait();
+                Environment.Exit(0);
             }
             return false;
         }
-
-/*         private static void DisableConsoleMouseInterference()
-        {
-            try
-            {
-                IntPtr hwnd = GetConsoleWindow();
-                IntPtr hMenu = GetSystemMenu(hwnd, false);
-                if (hMenu != IntPtr.Zero)
-                {
-                    for (uint i = 0; i < 10; i++)
-                        DeleteMenu(hMenu, i, MF_BYCOMMAND);
-                    DeleteMenu(hMenu, SC_CLOSE, MF_BYCOMMAND);
-                }
-                IntPtr consoleHandle = GetStdHandle(STD_INPUT_HANDLE);
-                if (GetConsoleMode(consoleHandle, out uint mode))
-                {
-                    mode &= ~ENABLE_QUICK_EDIT_MODE;
-                    mode |= ENABLE_EXTENDED_FLAGS;
-                    SetConsoleMode(consoleHandle, mode);
-                }
-            }
-            catch { } */
-
 
         private static Config.Config? _config;
         private static Stats _stats = new();
@@ -101,31 +90,7 @@ namespace ToastAlert
 
         static async Task Main(string[] args)
         {
-/*             //попытка в Windows terminal
-			
-			// Автоматический перезапуск в Windows Terminal (если установлен)
-			if (Environment.GetEnvironmentVariable("WT_SESSION") == null)
-			{
-				try
-				{
-					var psi = new ProcessStartInfo
-					{
-						FileName = "wt.exe",
-						Arguments = $"--window 0 new-tab --title \"Toast Alert\" -d \"{AppContext.BaseDirectory.TrimEnd('\\')}\" \"{Environment.ProcessPath}\" {string.Join(" ", args.Select(a => $"\"{a}\""))}",
-						UseShellExecute = false,
-						CreateNoWindow = true
-					};
-					Process.Start(psi);
-					return;
-				}
-				catch
-        {
-            // Windows Terminal не установлен – продолжаем в обычной консоли
-        } 
-		}*/
-
-			//
-			//DisableConsoleMouseInterference();
+            _cts = new CancellationTokenSource();
 
             _consoleDelegate = ConsoleCtrlHandler;
             SetConsoleCtrlHandler(_consoleDelegate, true);
@@ -138,30 +103,37 @@ namespace ToastAlert
 
             _config = ConfigLoader.Load();
             if (_config == null) return;
-			// Автоматический перезапуск в Windows Terminal
-			if (_config.Additional.UseWindowsTerminal && Environment.GetEnvironmentVariable("WT_SESSION") == null)
-			{
-				try
-				{
-					var psi = new ProcessStartInfo
-					{
-						FileName = "wt.exe",
-						Arguments = $"--window 0 new-tab --title \"Toast Alert\" -d \"{AppContext.BaseDirectory.TrimEnd('\\')}\" \"{Environment.ProcessPath}\" {string.Join(" ", args.Select(a => $"\"{a}\""))}",
-						UseShellExecute = false,
-						CreateNoWindow = true
-					};
-					Process.Start(psi);
-					return;
-				}
-				catch { }
-			}
+
+            if (_config.Additional.UseWindowsTerminal && Environment.GetEnvironmentVariable("WT_SESSION") == null)
+            {
+                try
+                {
+                    var psi = new ProcessStartInfo
+                    {
+                        FileName = "wt.exe",
+                        Arguments = $"--window 0 new-tab --title \"Toast Alert\" -d \"{AppContext.BaseDirectory.TrimEnd('\\')}\" \"{Environment.ProcessPath}\" {string.Join(" ", args.Select(a => $"\"{a.Replace("\"", "\\\"")}\""))}",
+                        UseShellExecute = false,
+                        CreateNoWindow = true
+                    };
+                    Process.Start(psi);
+                    return;
+                }
+                catch { }
+            }
+
             _stats.CurrentVolume = _config.VoiceAlert.TtsVolume;
             _tts = new TtsService(_config, _stats);
             _mqtt = new MqttService(_config, _stats);
             _dedup = new DeduplicationService(_config);
             _logger = new LoggerService(_config);
-            _ui = new ConsoleUi(_config, _tts, _mqtt, _dedup, _stats);
-            _monitor = new NotificationMonitor(_config, _tts, _mqtt, _dedup, _logger, _ui, _stats);
+			var rewriteService = new MessageRewriteService();
+            // Создание сервисов для команд и пасхалок
+            
+            var quickConfig = new QuickConfigService(_config, _tts, _mqtt);
+			_easterEgg = new EasterEggService(_config, _tts, _stats, rewriteService, _cts.Token);
+			var commandService = new CommandService(_easterEgg, quickConfig, _config, _stats);
+			_ui = new ConsoleUi(_config, _tts, _mqtt, _dedup, _stats, _cts, _easterEgg, commandService);
+			_monitor = new NotificationMonitor(_config, _tts, _mqtt, _dedup, _logger, _ui, _stats, _cts.Token, commandService, rewriteService);
 
             if (!ParseArgs(args)) return;
             if (_config.Additional.PreventSleep)
@@ -170,12 +142,17 @@ namespace ToastAlert
             _tts.Initialize();
             _ui.PrintBanner();
             _monitor.LoadProcessedIds();
+            if (_config.Mqtt.Enabled && _config.Additional.MqttEnabled)
+            {
+                await _mqtt.CheckAndResolveConflictAsync();
+            }
             await _mqtt.InitializeAsync();
 
             if (_config.Monitoring.StartMinimized)
                 Console.WriteLine("🪟 Запуск в свернутом режиме...");
 
-            await _monitor.RunAsync();
+            _monitorTask = _monitor.RunAsync();
+            await _monitorTask;
         }
 
         private static void SetConsoleTitleWithVersion()
@@ -194,9 +171,7 @@ namespace ToastAlert
                 var assembly = Assembly.GetEntryAssembly();
                 if (assembly != null)
                 {
-                    string? exePath = assembly.Location;
-                    if (string.IsNullOrEmpty(exePath))
-                        exePath = Path.Combine(AppContext.BaseDirectory, assembly.GetName().Name + ".exe");
+                    string exePath = Path.Combine(AppContext.BaseDirectory, assembly.GetName().Name + ".exe");
                     if (File.Exists(exePath))
                     {
                         var icon = Icon.ExtractAssociatedIcon(exePath);
@@ -254,6 +229,7 @@ namespace ToastAlert
     --delete-mode <mode> never/immediate/on_exit
 
 ГОРЯЧИЕ КЛАВИШИ:
+    ` (ё)       - Командный режим
     Ctrl+C      - Остановка
     S           - Статистика
     C           - Конфигурация

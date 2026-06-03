@@ -5,16 +5,18 @@ using System.Speech.Synthesis;
 using ToastAlert.Config;
 using ToastAlert.Models;
 using ToastAlert.Utilities;
+using System.Threading.Tasks;
 
 namespace ToastAlert.Services
 {
-    public class TtsService
+    public class TtsService : IDisposable
     {
         private readonly Config.Config _config;
         private SpeechSynthesizer? _synthesizer;
         private readonly Stats _stats;
         private DateTime _lastSpeechTime = DateTime.MinValue;
-        private List<InstalledVoice>? _installedVoices;   // кэш голосов
+        private List<InstalledVoice>? _installedVoices;
+        private bool _disposed = false;
 
         public bool IsMuted { get; set; }
 
@@ -24,35 +26,35 @@ namespace ToastAlert.Services
             _stats = stats;
         }
 
-		public string? GetCurrentVoiceName()
-		{
-			return _synthesizer?.Voice?.Name;
-		}
+        public string? GetCurrentVoiceName()
+        {
+            return _synthesizer?.Voice?.Name;
+        }
 
         public void Initialize()
         {
             if (!_config.VoiceAlert.Enabled)
             {
                 Console.WriteLine("🔇 TTS отключен в настройках\n");
+                SafeDisposeSynthesizer();
                 _synthesizer = null;
                 return;
             }
 
             try
             {
-                _synthesizer = new SpeechSynthesizer();
-                _synthesizer.SetOutputToDefaultAudioDevice();
-                _synthesizer.Rate = _config.VoiceAlert.TtsRate;
-                _synthesizer.Volume = _config.VoiceAlert.TtsVolume;
+                var newSynth = new SpeechSynthesizer();
+                newSynth.SetOutputToDefaultAudioDevice();
+                newSynth.Rate = _config.VoiceAlert.TtsRate;
+                newSynth.Volume = _config.VoiceAlert.TtsVolume;
                 _stats.CurrentVolume = _config.VoiceAlert.TtsVolume;
 
-                // ---- Выбор голоса: сначала из конфига, затем русский по умолчанию ----
                 bool voiceSet = false;
                 if (!string.IsNullOrEmpty(_config.VoiceAlert.VoiceName))
                 {
                     try
                     {
-                        _synthesizer.SelectVoice(_config.VoiceAlert.VoiceName);
+                        newSynth.SelectVoice(_config.VoiceAlert.VoiceName);
                         Console.WriteLine($"🎤 Голос из конфига: {_config.VoiceAlert.VoiceName}\n");
                         voiceSet = true;
                     }
@@ -64,11 +66,11 @@ namespace ToastAlert.Services
 
                 if (!voiceSet)
                 {
-                    foreach (var voice in _synthesizer.GetInstalledVoices())
+                    foreach (var voice in newSynth.GetInstalledVoices())
                     {
                         if (voice.VoiceInfo.Culture.Name.StartsWith("ru"))
                         {
-                            _synthesizer.SelectVoice(voice.VoiceInfo.Name);
+                            newSynth.SelectVoice(voice.VoiceInfo.Name);
                             Console.WriteLine($"🎤 Голос: {voice.VoiceInfo.Name}\n");
                             voiceSet = true;
                             break;
@@ -78,16 +80,34 @@ namespace ToastAlert.Services
 
                 if (!voiceSet)
                     Console.WriteLine("🎤 Используется голос по умолчанию\n");
+
+                SafeDisposeSynthesizer();
+                _synthesizer = newSynth;
+                _installedVoices = null;
             }
             catch (Exception ex)
             {
                 Console.WriteLine($"⚠️ TTS ошибка: {ex.Message}");
                 Console.WriteLine("   Будет использован звуковой сигнал\n");
+                SafeDisposeSynthesizer();
                 _synthesizer = null;
             }
         }
 
-        public void Speak(string text, bool isPriority)
+        private void SafeDisposeSynthesizer()
+        {
+            if (_synthesizer != null)
+            {
+                try
+                {
+                    _synthesizer.Dispose();
+                }
+                catch { }
+                _synthesizer = null;
+            }
+        }
+
+        public void Speak(string text, bool isPriority, bool allowInterrupt = true)
         {
             if (!_config.VoiceAlert.Enabled)
             {
@@ -109,8 +129,10 @@ namespace ToastAlert.Services
                     if (_config.Priorities.HighPriorityBeep)
                         Console.Beep(2000, 300);
                 }
-                if (_config.VoiceAlert.AbortPreviousSpeech && _synthesizer.State == SynthesizerState.Speaking)
+                if (allowInterrupt && _config.VoiceAlert.AbortPreviousSpeech && _synthesizer.State == SynthesizerState.Speaking)
+                {
                     _synthesizer.SpeakAsyncCancelAll();
+                }
 
                 _synthesizer.SpeakAsync(text);
                 PlayBeep(isPriority ? _config.Sounds.OnKeywordDetectedSound : _config.Sounds.OnNewMessageSound);
@@ -126,12 +148,15 @@ namespace ToastAlert.Services
 
         private void PlayBeep(string soundType)
         {
-            switch (soundType.ToLower())
+            Task.Run(() =>
             {
-                case "beep": Console.Beep(1000, 150); break;
-                case "beep_high": Console.Beep(2000, 200); break;
-                case "beep_low": Console.Beep(500, 300); break;
-            }
+                switch (soundType.ToLower())
+                {
+                    case "beep": Console.Beep(1000, 150); break;
+                    case "beep_high": Console.Beep(2000, 200); break;
+                    case "beep_low": Console.Beep(500, 300); break;
+                }
+            });
         }
 
         public void ChangeVolume(int delta)
@@ -144,7 +169,7 @@ namespace ToastAlert.Services
             if (_config.Additional.RememberVolume)
             {
                 _config.VoiceAlert.TtsVolume = newVol;
-                // сохранение должно быть вызвано извне
+                ConfigLoader.Save(_config);
             }
         }
 
@@ -156,9 +181,12 @@ namespace ToastAlert.Services
 
         public void UpdateLastSpeechTime() => _lastSpeechTime = DateTime.Now;
 
-        public void Dispose() => _synthesizer?.Dispose();
-
-        // ---------- Новые методы для работы с голосами ----------
+        public void Dispose()
+        {
+            if (_disposed) return;
+            _disposed = true;
+            SafeDisposeSynthesizer();
+        }
 
         public List<(string Name, string Culture, bool IsDefault)> GetVoicesList()
         {
@@ -180,8 +208,8 @@ namespace ToastAlert.Services
             try
             {
                 _synthesizer.SelectVoice(name);
+                _synthesizer.SetOutputToDefaultAudioDevice(); // ВАЖНО: восстановить вывод звука
                 _config.VoiceAlert.VoiceName = name;
-                // Сохраняем конфиг сразу
                 ConfigLoader.Save(_config);
                 Console.WriteLine($"🎤 Голос изменён на: {name}");
                 return true;
